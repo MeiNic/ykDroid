@@ -1,10 +1,11 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
     <string name="app_name">ykDroid</string>
     <string name="attach_yubikey">Please attach your YubiKey now.</string>
     <string name="attach_or_swipe_yubikey">Please attach or swipe your YubiKey now.</string>
     <string name="swipe_yubikey">Please swipe your YubiKey now.</string>
     <string name="no_supported_connection_method">Your device supports neither USB host mode nor NFC. YubiKeys can not be used.</string>
     <string name="press_button">Please press the button on your YubiKey.</string>
+    <string name="usb_permission_denied" tools:ignore="MissingTranslation">Access to your YubiKey was denied. Please unplug it and attach it again.</string>
     <string name="unplug_yubikey">An error has occurred. Please unplug your YubiKey.</string>
     <string name="invalid_challenge">An invalid challenge was passed. If this problem persists, please contact the vendor of the app you are trying to use ykDroid with.</string>
     <string-array name="slots">

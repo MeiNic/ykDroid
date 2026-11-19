@@ -9,7 +9,7 @@ android {
     defaultConfig {
         applicationId = 'net.pp3345.ykdroid'
         minSdk = 21
-        targetSdk = 33
+        targetSdk = 36
         versionCode = 7
         versionName = '1.3'
     }

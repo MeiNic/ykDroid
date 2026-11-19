@@ -133,6 +133,11 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 	}
 
 	@Override
+	public void onUsbPermissionDenied() {
+		((TextView) this.findViewById(R.id.info)).setText(R.string.usb_permission_denied);
+	}
+
+	@Override
 	public void onYubiKeyUnplugged() {
 		this.recreate();
 	}

@@ -1,5 +1,6 @@
 package net.pp3345.ykdroid;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Application;
 import android.app.PendingIntent;
@@ -25,6 +26,7 @@ import net.pp3345.ykdroid.yubikey.UsbYubiKey;
 class ConnectionManager extends BroadcastReceiver implements Application.ActivityLifecycleCallbacks {
 	private final Activity activity;
 	private       boolean  isActivityResumed;
+	private       boolean  receiverRegistered;
 
 	private static final String ACTION_USB_PERMISSION_REQUEST = "net.pp3345.ykdroid.intent.action.USB_PERMISSION_REQUEST";
 
@@ -51,6 +53,12 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		 *                YubiKey.
 		 */
 		void onYubiKeyConnected(YubiKey yubiKey);
+
+		/**
+		 * Called when the user denied access to a YubiKey connected via USB. The YubiKey needs to be
+		 * attached again for the user to be asked for permission once more.
+		 */
+		void onUsbPermissionDenied();
 	}
 
 	/**
@@ -95,8 +103,8 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 
 		final UsbManager usbManager = (UsbManager) this.activity.getSystemService(Context.USB_SERVICE);
 
-		this.activity.registerReceiver(this, new IntentFilter(ACTION_USB_PERMISSION_REQUEST));
-		this.activity.registerReceiver(this, new IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED));
+		this.registerReceiverCompat(new IntentFilter(ACTION_USB_PERMISSION_REQUEST));
+		this.registerReceiverCompat(new IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED));
 
 		assert usbManager != null;
 		for (final UsbDevice device : usbManager.getDeviceList().values())
@@ -135,7 +143,7 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		}
 
 		this.unplugReceiver = receiver;
-		this.activity.registerReceiver(this, new IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED));
+		this.registerReceiverCompat(new IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED));
 	}
 
 	private boolean isYubiKeyPlugged() {
@@ -156,19 +164,38 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		assert intent.getAction() != null;
 
 		switch (intent.getAction()) {
-			case ACTION_USB_PERMISSION_REQUEST:
-				if(!this.isYubiKeyPlugged()) // Do not keep asking for permission to access a YubiKey that was unplugged already
+			case ACTION_USB_PERMISSION_REQUEST: {
+				final UsbDevice device = getUsbDevice(intent);
+
+				if (device == null || !this.isYubiKeyPlugged()) // Do not keep asking for permission to access a YubiKey that was unplugged already
 					break;
-			case UsbManager.ACTION_USB_DEVICE_ATTACHED:
-				this.requestPermission((UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE));
-				break;
-			case UsbManager.ACTION_USB_DEVICE_DETACHED:
-				if (UsbYubiKey.Type.isDeviceKnown(((UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)))) {
-					this.activity.unregisterReceiver(this);
-					this.unplugReceiver.onYubiKeyUnplugged();
-					this.unplugReceiver = null;
+
+				final UsbManager usbManager = (UsbManager) this.activity.getSystemService(Context.USB_SERVICE);
+
+				assert usbManager != null;
+				if (usbManager.hasPermission(device)) {
+					this.requestPermission(device); // Permission is present now, so this connects to the YubiKey
+				} else if (this.connectReceiver != null) {
+					// Do not ask again, as this would show the permission dialog in an endless loop
+					this.connectReceiver.onUsbPermissionDenied();
 				}
 				break;
+			}
+			case UsbManager.ACTION_USB_DEVICE_ATTACHED:
+				this.requestPermission(getUsbDevice(intent));
+				break;
+			case UsbManager.ACTION_USB_DEVICE_DETACHED: {
+				final UsbDevice device = getUsbDevice(intent);
+
+				if (device != null && this.unplugReceiver != null && UsbYubiKey.Type.isDeviceKnown(device)) {
+					final YubiKeyUsbUnplugReceiver receiver = this.unplugReceiver;
+
+					this.unregisterReceiverIfRegistered();
+					this.unplugReceiver = null;
+					receiver.onYubiKeyUnplugged();
+				}
+				break;
+			}
 			case NfcAdapter.ACTION_TECH_DISCOVERED:
 				final IsoDep isoDep = IsoDep.get((Tag) intent.getParcelableExtra(NfcAdapter.EXTRA_TAG));
 
@@ -177,8 +204,7 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 					return;
 				}
 
-				if ((this.getSupportedConnectionMethods() & CONNECTION_METHOD_USB) != 0)
-					this.activity.unregisterReceiver(this);
+				this.unregisterReceiverIfRegistered();
 
 				this.connectReceiver.onYubiKeyConnected(new NfcYubiKey(isoDep));
 				this.connectReceiver = null;
@@ -196,19 +222,18 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 
 	@Override
 	public void onActivityStopped(final Activity activity) {
-		if (this.connectReceiver != null || this.unplugReceiver != null)
-			this.activity.unregisterReceiver(this);
+		this.unregisterReceiverIfRegistered();
 	}
 
 	private void requestPermission(final UsbDevice device) {
 		final UsbManager usbManager = (UsbManager) this.activity.getSystemService(Context.USB_SERVICE);
 
-		if (!UsbYubiKey.Type.isDeviceKnown(device))
+		if (this.connectReceiver == null || device == null || !UsbYubiKey.Type.isDeviceKnown(device))
 			return;
 
 		assert usbManager != null;
 		if (usbManager.hasPermission(device)) {
-			this.activity.unregisterReceiver(this);
+			this.unregisterReceiverIfRegistered();
 
 			if ((this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) != 0 && this.isActivityResumed)
 				NfcAdapter.getDefaultAdapter(this.activity).disableForegroundDispatch(this.activity);
@@ -216,8 +241,42 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 			this.connectReceiver.onYubiKeyConnected(new UsbYubiKey(device, usbManager.openDevice(device)));
 			this.connectReceiver = null;
 		} else {
-			usbManager.requestPermission(device, PendingIntent.getBroadcast(this.activity, 0, new Intent(ACTION_USB_PERMISSION_REQUEST), Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_MUTABLE : 0));
+			// Since Android 14, mutable PendingIntents must be explicit. The intent has to stay mutable, as the system adds the device and the result to it.
+			final Intent permissionIntent = new Intent(ACTION_USB_PERMISSION_REQUEST).setPackage(this.activity.getPackageName());
+
+			usbManager.requestPermission(device, PendingIntent.getBroadcast(this.activity, 0, permissionIntent, Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0));
 		}
+	}
+
+	@SuppressLint("UnspecifiedRegisterReceiverFlag") // The flag only exists (and is only required) on Android 13 and later
+	private void registerReceiverCompat(final IntentFilter filter) {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			// We only listen for broadcasts of the system and for the PendingIntent that we create ourselves
+			this.activity.registerReceiver(this, filter, Context.RECEIVER_NOT_EXPORTED);
+		} else {
+			this.activity.registerReceiver(this, filter);
+		}
+
+		this.receiverRegistered = true;
+	}
+
+	/**
+	 * Unregisters all registrations of this receiver, if there are any.
+	 */
+	private void unregisterReceiverIfRegistered() {
+		if (this.receiverRegistered) {
+			this.activity.unregisterReceiver(this);
+			this.receiverRegistered = false;
+		}
+	}
+
+	@SuppressWarnings("deprecation")
+	private static UsbDevice getUsbDevice(final Intent intent) {
+		// The typed variant is not used on older versions as it is broken on Android 13 (https://issuetracker.google.com/issues/240585930)
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+			return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice.class);
+
+		return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
 	}
 
 	/**
