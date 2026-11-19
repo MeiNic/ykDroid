@@ -166,10 +166,4 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 		this.findViewById(R.id.failure).setVisibility(View.VISIBLE);
 		this.findViewById(R.id.slotSelection).setVisibility(View.GONE);
 	}
-
-	@Override
-	protected void onNewIntent(final Intent intent) {
-		// This is kind of ugly but Android doesn't leave us any other choice
-		this.connectionManager.onReceive(this, intent);
-	}
 }

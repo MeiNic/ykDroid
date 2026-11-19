@@ -116,12 +116,7 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		if (this.connectReceiver == null || (this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) == 0)
 			return;
 
-		final IntentFilter filter = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
-
-		NfcAdapter.getDefaultAdapter(this.activity).enableForegroundDispatch(this.activity,
-				PendingIntent.getActivity(this.activity, -1, new Intent(this.activity, this.activity.getClass()), Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_MUTABLE : 0),
-		                                                                     new IntentFilter[]{filter},
-		                                                                     new String[][]{new String[]{IsoDep.class.getName()}});
+		this.enableNfcReaderMode();
 		this.isActivityResumed = true;
 	}
 
@@ -196,26 +191,13 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 				}
 				break;
 			}
-			case NfcAdapter.ACTION_TECH_DISCOVERED:
-				final IsoDep isoDep = IsoDep.get((Tag) intent.getParcelableExtra(NfcAdapter.EXTRA_TAG));
-
-				if (isoDep == null) {
-					// Not a YubiKey
-					return;
-				}
-
-				this.unregisterReceiverIfRegistered();
-
-				this.connectReceiver.onYubiKeyConnected(new NfcYubiKey(isoDep));
-				this.connectReceiver = null;
-				break;
 		}
 	}
 
 	@Override
 	public void onActivityPaused(final Activity activity) {
 		if (this.connectReceiver != null && (this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) != 0)
-			NfcAdapter.getDefaultAdapter(this.activity).disableForegroundDispatch(this.activity);
+			this.disableNfcReaderMode();
 
 		this.isActivityResumed = false;
 	}
@@ -236,7 +218,7 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 			this.unregisterReceiverIfRegistered();
 
 			if ((this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) != 0 && this.isActivityResumed)
-				NfcAdapter.getDefaultAdapter(this.activity).disableForegroundDispatch(this.activity);
+				this.disableNfcReaderMode();
 
 			this.connectReceiver.onYubiKeyConnected(new UsbYubiKey(device, usbManager.openDevice(device)));
 			this.connectReceiver = null;
@@ -246,6 +228,48 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 
 			usbManager.requestPermission(device, PendingIntent.getBroadcast(this.activity, 0, permissionIntent, Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0));
 		}
+	}
+
+	/**
+	 * Makes Android deliver NFC tags directly to {@link #onNfcTagDiscovered(Tag)} while the activity
+	 * is in the foreground. Other than foreground dispatch, reader mode does not read the NDEF message
+	 * of the YubiKey (which would make Android open its URL in a browser) and does not allow other
+	 * apps to handle the tag.
+	 */
+	private void enableNfcReaderMode() {
+		final Bundle options = new Bundle();
+		options.putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 50);
+
+		NfcAdapter.getDefaultAdapter(this.activity).enableReaderMode(this.activity, this::onNfcTagDiscovered,
+				NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_NFC_B | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, options);
+	}
+
+	private void disableNfcReaderMode() {
+		NfcAdapter.getDefaultAdapter(this.activity).disableReaderMode(this.activity);
+	}
+
+	/**
+	 * Called by Android on a binder thread when an NFC tag was discovered.
+	 */
+	private void onNfcTagDiscovered(final Tag tag) {
+		this.activity.runOnUiThread(() -> {
+			// Ignore the tag if a YubiKey was connected already (or if nobody wants one anymore)
+			if (this.connectReceiver == null || this.activity.isFinishing() || this.activity.isDestroyed())
+				return;
+
+			final IsoDep isoDep = IsoDep.get(tag);
+
+			if (isoDep == null) {
+				// Not a YubiKey
+				return;
+			}
+
+			this.unregisterReceiverIfRegistered();
+
+			final YubiKeyConnectReceiver receiver = this.connectReceiver;
+			this.connectReceiver = null;
+			receiver.onYubiKeyConnected(new NfcYubiKey(isoDep));
+		});
 	}
 
 	@SuppressLint("UnspecifiedRegisterReceiverFlag") // The flag only exists (and is only required) on Android 13 and later
@@ -292,7 +316,9 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		if (packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST))
 			result |= CONNECTION_METHOD_USB;
 
-		if (packageManager.hasSystemFeature(PackageManager.FEATURE_NFC) && NfcAdapter.getDefaultAdapter(this.activity).isEnabled())
+		final NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this.activity);
+
+		if (packageManager.hasSystemFeature(PackageManager.FEATURE_NFC) && nfcAdapter != null && nfcAdapter.isEnabled())
 			result |= CONNECTION_METHOD_NFC;
 
 		return result;
