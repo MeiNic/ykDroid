@@ -6,6 +6,11 @@
     <string name="no_supported_connection_method">Your device supports neither USB host mode nor NFC. YubiKeys can not be used.</string>
     <string name="press_button">Please press the button on your YubiKey.</string>
     <string name="usb_permission_denied" tools:ignore="MissingTranslation">Access to your YubiKey was denied. Please unplug it and attach it again.</string>
+    <string name="slot_not_responding" tools:ignore="MissingTranslation">Your YubiKey did not respond. Is the selected slot set up for HMAC-SHA1 challenge-response? Please try the other slot.</string>
+    <string name="otp_not_available" tools:ignore="MissingTranslation">OTP is disabled on your YubiKey, so it can not be used over USB. Please enable it using YubiKey Manager or use NFC.</string>
+    <string name="connection_lost" tools:ignore="MissingTranslation">The connection to your YubiKey was lost. Please hold it against your device until this dialog closes.</string>
+    <string name="request_rejected" tools:ignore="MissingTranslation">Your YubiKey rejected the request. Over NFC, OTP must be enabled and the slot must not require touching the button.</string>
+    <string name="error_try_again" tools:ignore="MissingTranslation">Something went wrong. Please try again.</string>
     <string name="unplug_yubikey">An error has occurred. Please unplug your YubiKey.</string>
     <string name="invalid_challenge">An invalid challenge was passed. If this problem persists, please contact the vendor of the app you are trying to use ykDroid with.</string>
     <string-array name="slots">
