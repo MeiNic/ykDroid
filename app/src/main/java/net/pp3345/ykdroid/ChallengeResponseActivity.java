@@ -103,6 +103,8 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 				} catch (final Exception e) {
 					this.executionException = e;
 					return null;
+				} finally {
+					yubiKey.close();
 				}
 			}
 

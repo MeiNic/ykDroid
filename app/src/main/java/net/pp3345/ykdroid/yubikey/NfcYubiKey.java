@@ -76,6 +76,15 @@ public class NfcYubiKey implements YubiKey {
 		}
 	}
 
+	@Override
+	public void close() {
+		try {
+			this.tag.close();
+		} catch (final IOException ignored) {
+			// There is nothing left to clean up if the connection to the tag is already gone
+		}
+	}
+
 	private static String formatStatusWord(final ResponseApdu response) {
 		return String.format("%04x", response.getStatusWord() & 0xffff);
 	}

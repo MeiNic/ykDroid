@@ -10,6 +10,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
@@ -215,12 +216,20 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 
 		assert usbManager != null;
 		if (usbManager.hasPermission(device)) {
+			final UsbDeviceConnection connection = usbManager.openDevice(device);
+
+			if (connection == null) {
+				// The device could not be opened, e.g. because it was unplugged in the meantime. Keep waiting for it to be attached again.
+				this.connectReceiver.onUsbPermissionDenied();
+				return;
+			}
+
 			this.unregisterReceiverIfRegistered();
 
 			if ((this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) != 0 && this.isActivityResumed)
 				this.disableNfcReaderMode();
 
-			this.connectReceiver.onYubiKeyConnected(new UsbYubiKey(device, usbManager.openDevice(device)));
+			this.connectReceiver.onYubiKeyConnected(new UsbYubiKey(device, connection));
 			this.connectReceiver = null;
 		} else {
 			// Since Android 14, mutable PendingIntents must be explicit. The intent has to stay mutable, as the system adds the device and the result to it.

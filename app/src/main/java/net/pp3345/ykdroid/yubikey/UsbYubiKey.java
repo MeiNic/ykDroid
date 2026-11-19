@@ -3,6 +3,7 @@ package net.pp3345.ykdroid.yubikey;
 import android.hardware.usb.UsbConstants;
 import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
+import android.hardware.usb.UsbInterface;
 
 import net.pp3345.ykdroid.YubiKey;
 
@@ -12,6 +13,7 @@ import net.pp3345.ykdroid.YubiKey;
 public class UsbYubiKey implements YubiKey {
 	private final UsbDeviceConnection connection;
 	private final UsbDevice           device;
+	private       UsbInterface        otpInterface;
 
 	/**
 	 * The USB vendor ID assigned to Yubico.
@@ -219,13 +221,40 @@ public class UsbYubiKey implements YubiKey {
 		this.write(Slot.DUMMY, dummy);
 	}
 
+	/**
+	 * Finds the interface that provides the OTP application of the YubiKey. It is presented to the
+	 * host as a HID keyboard (boot interface).
+	 */
+	private UsbInterface findOtpInterface() throws OtpNotAvailableException {
+		for (int i = 0; i < this.device.getInterfaceCount(); i++) {
+			final UsbInterface usbInterface = this.device.getInterface(i);
+
+			if (usbInterface.getInterfaceClass() == UsbConstants.USB_CLASS_HID && usbInterface.getInterfaceSubclass() == UsbConstants.USB_INTERFACE_SUBCLASS_BOOT)
+				return usbInterface;
+		}
+
+		// Devices of other vendors (OnlyKey) have always been used through their first interface
+		if (this.device.getVendorId() != YUBICO_USB_VENDOR_ID && this.device.getInterfaceCount() > 0)
+			return this.device.getInterface(0);
+
+		throw new OtpNotAvailableException();
+	}
+
 	private void tryClaim() throws YubiKeyException {
-		if (!this.connection.claimInterface(this.device.getInterface(0), true)) // We need to detach the kernel driver from the device to get exclusive access
+		this.otpInterface = this.findOtpInterface();
+
+		if (!this.connection.claimInterface(this.otpInterface, true)) // We need to detach the kernel driver from the device to get exclusive access
 			throw new YubiKeyException("Failed to claim interface");
 	}
 
 	private void release() {
-		this.connection.releaseInterface(this.device.getInterface(0)); // We probably don't really need to care about errors here
+		if (this.otpInterface != null)
+			this.connection.releaseInterface(this.otpInterface); // We probably don't really need to care about errors here
+	}
+
+	@Override
+	public void close() {
+		this.connection.close();
 	}
 
 	private byte[] waitForStatus(final boolean mayBlock, final short mask, final StatusMode mode) throws YubiKeyException {
@@ -241,7 +270,7 @@ public class UsbYubiKey implements YubiKey {
 
 			waitInterval *= 2;
 
-			final int bytes = this.connection.controlTransfer(UsbConstants.USB_TYPE_CLASS | UsbConstants.USB_DIR_IN | 0x1, HID_GET_REPORT, REPORT_TYPE_FEATURE, 0, data, REPORT_TYPE_FEATURE_DATA_SIZE, YUBIKEY_OPERATION_TIMEOUT_MS);
+			final int bytes = this.connection.controlTransfer(UsbConstants.USB_TYPE_CLASS | UsbConstants.USB_DIR_IN | 0x1, HID_GET_REPORT, REPORT_TYPE_FEATURE, this.otpInterface.getId(), data, REPORT_TYPE_FEATURE_DATA_SIZE, YUBIKEY_OPERATION_TIMEOUT_MS);
 
 			if (bytes != REPORT_TYPE_FEATURE_DATA_SIZE)
 				throw new YubiKeyException("controlTransfer failed: " + bytes);
@@ -287,7 +316,7 @@ public class UsbYubiKey implements YubiKey {
 		while (bytesRead + REPORT_TYPE_FEATURE_DATA_SIZE <= response.length || expectedBytes == 0) {
 			final byte[] data = new byte[REPORT_TYPE_FEATURE_DATA_SIZE];
 
-			final int bytes = this.connection.controlTransfer(UsbConstants.USB_TYPE_CLASS | UsbConstants.USB_DIR_IN | 0x1, HID_GET_REPORT, REPORT_TYPE_FEATURE, 0, data, REPORT_TYPE_FEATURE_DATA_SIZE, YUBIKEY_OPERATION_TIMEOUT_MS);
+			final int bytes = this.connection.controlTransfer(UsbConstants.USB_TYPE_CLASS | UsbConstants.USB_DIR_IN | 0x1, HID_GET_REPORT, REPORT_TYPE_FEATURE, this.otpInterface.getId(), data, REPORT_TYPE_FEATURE_DATA_SIZE, YUBIKEY_OPERATION_TIMEOUT_MS);
 
 			if (bytes != REPORT_TYPE_FEATURE_DATA_SIZE)
 				throw new YubiKeyException("controlTransfer failed: " + bytes);
@@ -358,7 +387,7 @@ public class UsbYubiKey implements YubiKey {
 			this.waitForStatus(false, STATUS_FLAG_WRITE, StatusMode.CLEAR);
 
 			//noinspection PointlessBitwiseExpression
-			final int bytes = this.connection.controlTransfer(UsbConstants.USB_TYPE_CLASS | UsbConstants.USB_DIR_OUT | 0x1, HID_SET_REPORT, REPORT_TYPE_FEATURE, 0, sequenceData, REPORT_TYPE_FEATURE_DATA_SIZE, YUBIKEY_OPERATION_TIMEOUT_MS);
+			final int bytes = this.connection.controlTransfer(UsbConstants.USB_TYPE_CLASS | UsbConstants.USB_DIR_OUT | 0x1, HID_SET_REPORT, REPORT_TYPE_FEATURE, this.otpInterface.getId(), sequenceData, REPORT_TYPE_FEATURE_DATA_SIZE, YUBIKEY_OPERATION_TIMEOUT_MS);
 
 			if (bytes != REPORT_TYPE_FEATURE_DATA_SIZE)
 				throw new YubiKeyException("controlTransfer failed: " + bytes);

@@ -29,4 +29,10 @@ public interface YubiKey {
 	 *                              be thrown.
 	 */
 	byte[] challengeResponse(final Slot slot, final byte[] challenge) throws YubiKeyException;
+
+	/**
+	 * Releases the connection to the YubiKey. Must be called as soon as the YubiKey is not needed
+	 * anymore.
+	 */
+	void close();
 }
