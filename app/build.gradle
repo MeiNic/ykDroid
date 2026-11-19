@@ -10,8 +10,8 @@ android {
         applicationId = 'net.pp3345.ykdroid'
         minSdk = 21
         targetSdk = 36
-        versionCode = 7
-        versionName = '1.3'
+        versionCode = 8
+        versionName = '1.4'
     }
 
     buildTypes {
