@@ -6,13 +6,13 @@
     <string name="swipe_yubikey">Bitte lege jetzt deinen YubiKey auf.</string>
     <string name="no_supported_connection_method">Dein Gerät unterstützt weder den USB Host Mode, noch NFC. YubiKeys können daher nicht benutzt werden.</string>
     <string name="press_button">Bitte berühre den Knopf deines YubiKeys.</string>
-    <string name="usb_permission_denied">Der Zugriff auf deinen YubiKey wurde verweigert. Bitte ziehe ihn ab und stecke ihn erneut ein.</string>
-    <string name="slot_not_responding">Dein YubiKey hat nicht geantwortet. Ist der ausgewählte Slot für HMAC-SHA1 Challenge-Response eingerichtet? Bitte versuche es mit dem anderen Slot.</string>
-    <string name="otp_not_available">OTP ist auf deinem YubiKey deaktiviert, daher kann er nicht über USB benutzt werden. Bitte aktiviere es mit dem YubiKey Manager oder nutze NFC.</string>
-    <string name="connection_lost">Die Verbindung zu deinem YubiKey wurde unterbrochen. Bitte halte ihn an dein Gerät, bis sich dieses Fenster schließt.</string>
-    <string name="request_rejected">Dein YubiKey hat die Anfrage abgelehnt. Über NFC muss OTP aktiviert sein und der Slot darf keine Berührung des Knopfes erfordern.</string>
+    <string name="usb_permission_denied">Der USB-Zugriff wurde verweigert. Bitte ziehe deinen YubiKey ab, stecke ihn erneut ein und tippe auf OK.</string>
+    <string name="slot_not_responding">%1$s hat nicht geantwortet. Ist er für HMAC-SHA1 Challenge-Response eingerichtet? Falls nicht, versuche %2$s.</string>
+    <string name="otp_not_available">OTP ist auf deinem YubiKey ausgeschaltet. Schalte es im YubiKey Manager ein, um USB zu nutzen, oder nutze NFC.</string>
+    <string name="connection_lost">Die Verbindung wurde unterbrochen. Bitte halte deinen YubiKey an dein Gerät, bis sich dieses Fenster schließt.</string>
+    <string name="request_rejected">Dein YubiKey hat die Anfrage abgelehnt. Über NFC muss OTP eingeschaltet sein und der Slot darf keinen Knopfdruck verlangen.</string>
     <string name="error_try_again">Etwas ist schiefgelaufen. Bitte versuche es erneut.</string>
-    <string name="unplug_yubikey">Ein Fehler ist aufgetreten. Bitte ziehe deinen YubiKey ab.</string>
+    <string name="unplug_yubikey">Bitte ziehe deinen YubiKey ab und stecke ihn erneut ein.</string>
     <string-array name="slots">
         <item>Slot 1</item>
         <item>Slot 2</item>

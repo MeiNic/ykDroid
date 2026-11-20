@@ -96,8 +96,10 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 			this.errorMessage = savedInstanceState.getInt(STATE_ERROR_MESSAGE, 0);
 			this.selectedSlot = slotAt(savedInstanceState.getInt(STATE_SLOT_POSITION, positionOf(this.selectedSlot)));
 
-			if (this.errorMessage != 0)
-				info.setText(this.errorMessage);
+			if (this.errorMessage != 0) {
+				info.setText(this.getErrorText(this.selectedSlot, this.promptMessage));
+				this.setWarningIcon(true);
+			}
 		}
 
 		final Spinner slotSelection = this.findViewById(R.id.slotSelection);
@@ -131,6 +133,7 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 		// This also replaces the explanation of a previous failure, if there was one
 		((TextView) this.findViewById(R.id.info)).setText(yubiKey instanceof UsbYubiKey ? R.string.press_button : this.promptMessage);
 		this.findViewById(R.id.slotSelection).setVisibility(View.GONE);
+		this.setWarningIcon(false);
 		this.errorMessage = 0;
 
 		final Slot   slot      = this.selectedSlot;
@@ -169,12 +172,12 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 		} else {
 			Log.e("ykDroid", "Error during challenge-response request", failure);
 
-			// With USB, the YubiKey has to be unplugged first. Then (or immediately, with NFC) the activity is recreated and explains the failure.
+			// With USB, the YubiKey has to be unplugged first. Then (or immediately, with NFC) the activity is recreated and offers another attempt.
 			this.errorMessage = getErrorMessage(failure);
 			this.connectionManager.waitForYubiKeyUnplug(this);
 			this.showError();
 
-			((TextView) this.findViewById(R.id.info)).setText(R.string.unplug_yubikey);
+			((TextView) this.findViewById(R.id.info)).setText(this.getErrorText(slot, R.string.unplug_yubikey));
 		}
 	}
 
@@ -197,6 +200,7 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 	@Override
 	public void onUsbPermissionDenied() {
 		((TextView) this.findViewById(R.id.info)).setText(R.string.usb_permission_denied);
+		this.setWarningIcon(true);
 	}
 
 	@Override
@@ -230,8 +234,29 @@ public class ChallengeResponseActivity extends Activity implements ConnectionMan
 	}
 
 	private void showError() {
-		this.findViewById(R.id.waiting).setVisibility(View.GONE);
-		this.findViewById(R.id.failure).setVisibility(View.VISIBLE);
+		this.setWarningIcon(true);
 		this.findViewById(R.id.slotSelection).setVisibility(View.GONE);
+	}
+
+	/**
+	 * Shows a warning sign instead of the progress indicator.
+	 */
+	private void setWarningIcon(final boolean warning) {
+		this.findViewById(R.id.waiting).setVisibility(warning ? View.GONE : View.VISIBLE);
+		this.findViewById(R.id.failure).setVisibility(warning ? View.VISIBLE : View.GONE);
+	}
+
+	/**
+	 * Explains why the last attempt with the given slot failed, followed by a hint on how to continue.
+	 */
+	private String getErrorText(final Slot slot, final int hint) {
+		final String[] slots    = this.getResources().getStringArray(R.array.slots);
+		final int      position = positionOf(slot);
+
+		// Messages may refer to the slot that was tried (first argument) and to the other one (second argument). The slot number is kept on the same line as the word "Slot".
+		final String tried = slots[position].replace(' ', '\u00A0');
+		final String other = slots[1 - position].replace(' ', '\u00A0');
+
+		return this.getString(this.errorMessage, tried, other) + "\n\n" + this.getString(hint);
 	}
 }
