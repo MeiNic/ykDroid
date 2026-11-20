@@ -1,5 +1,6 @@
 package net.pp3345.ykdroid;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.app.Application;
 import android.app.PendingIntent;
@@ -9,6 +10,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.hardware.usb.UsbDevice;
+import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.nfc.NfcAdapter;
 import android.nfc.Tag;
@@ -25,6 +27,7 @@ import net.pp3345.ykdroid.yubikey.UsbYubiKey;
 class ConnectionManager extends BroadcastReceiver implements Application.ActivityLifecycleCallbacks {
 	private final Activity activity;
 	private       boolean  isActivityResumed;
+	private       boolean  receiverRegistered;
 
 	private static final String ACTION_USB_PERMISSION_REQUEST = "net.pp3345.ykdroid.intent.action.USB_PERMISSION_REQUEST";
 
@@ -51,6 +54,12 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		 *                YubiKey.
 		 */
 		void onYubiKeyConnected(YubiKey yubiKey);
+
+		/**
+		 * Called when the user denied access to a YubiKey connected via USB. The YubiKey needs to be
+		 * attached again for the user to be asked for permission once more.
+		 */
+		void onUsbPermissionDenied();
 	}
 
 	/**
@@ -95,8 +104,8 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 
 		final UsbManager usbManager = (UsbManager) this.activity.getSystemService(Context.USB_SERVICE);
 
-		this.activity.registerReceiver(this, new IntentFilter(ACTION_USB_PERMISSION_REQUEST));
-		this.activity.registerReceiver(this, new IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED));
+		this.registerReceiverCompat(new IntentFilter(ACTION_USB_PERMISSION_REQUEST));
+		this.registerReceiverCompat(new IntentFilter(UsbManager.ACTION_USB_DEVICE_ATTACHED));
 
 		assert usbManager != null;
 		for (final UsbDevice device : usbManager.getDeviceList().values())
@@ -108,12 +117,7 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		if (this.connectReceiver == null || (this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) == 0)
 			return;
 
-		final IntentFilter filter = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
-
-		NfcAdapter.getDefaultAdapter(this.activity).enableForegroundDispatch(this.activity,
-				PendingIntent.getActivity(this.activity, -1, new Intent(this.activity, this.activity.getClass()), Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_MUTABLE : 0),
-		                                                                     new IntentFilter[]{filter},
-		                                                                     new String[][]{new String[]{IsoDep.class.getName()}});
+		this.enableNfcReaderMode();
 		this.isActivityResumed = true;
 	}
 
@@ -135,7 +139,7 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		}
 
 		this.unplugReceiver = receiver;
-		this.activity.registerReceiver(this, new IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED));
+		this.registerReceiverCompat(new IntentFilter(UsbManager.ACTION_USB_DEVICE_DETACHED));
 	}
 
 	private boolean isYubiKeyPlugged() {
@@ -156,68 +160,156 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		assert intent.getAction() != null;
 
 		switch (intent.getAction()) {
-			case ACTION_USB_PERMISSION_REQUEST:
-				if(!this.isYubiKeyPlugged()) // Do not keep asking for permission to access a YubiKey that was unplugged already
+			case ACTION_USB_PERMISSION_REQUEST: {
+				final UsbDevice device = getUsbDevice(intent);
+
+				if (device == null || !this.isYubiKeyPlugged()) // Do not keep asking for permission to access a YubiKey that was unplugged already
 					break;
+
+				final UsbManager usbManager = (UsbManager) this.activity.getSystemService(Context.USB_SERVICE);
+
+				assert usbManager != null;
+				if (usbManager.hasPermission(device)) {
+					this.requestPermission(device); // Permission is present now, so this connects to the YubiKey
+				} else if (this.connectReceiver != null) {
+					// Do not ask again, as this would show the permission dialog in an endless loop
+					this.connectReceiver.onUsbPermissionDenied();
+				}
+				break;
+			}
 			case UsbManager.ACTION_USB_DEVICE_ATTACHED:
-				this.requestPermission((UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE));
+				this.requestPermission(getUsbDevice(intent));
 				break;
-			case UsbManager.ACTION_USB_DEVICE_DETACHED:
-				if (UsbYubiKey.Type.isDeviceKnown(((UsbDevice) intent.getParcelableExtra(UsbManager.EXTRA_DEVICE)))) {
-					this.activity.unregisterReceiver(this);
-					this.unplugReceiver.onYubiKeyUnplugged();
+			case UsbManager.ACTION_USB_DEVICE_DETACHED: {
+				final UsbDevice device = getUsbDevice(intent);
+
+				if (device != null && this.unplugReceiver != null && UsbYubiKey.Type.isDeviceKnown(device)) {
+					final YubiKeyUsbUnplugReceiver receiver = this.unplugReceiver;
+
+					this.unregisterReceiverIfRegistered();
 					this.unplugReceiver = null;
+					receiver.onYubiKeyUnplugged();
 				}
 				break;
-			case NfcAdapter.ACTION_TECH_DISCOVERED:
-				final IsoDep isoDep = IsoDep.get((Tag) intent.getParcelableExtra(NfcAdapter.EXTRA_TAG));
-
-				if (isoDep == null) {
-					// Not a YubiKey
-					return;
-				}
-
-				if ((this.getSupportedConnectionMethods() & CONNECTION_METHOD_USB) != 0)
-					this.activity.unregisterReceiver(this);
-
-				this.connectReceiver.onYubiKeyConnected(new NfcYubiKey(isoDep));
-				this.connectReceiver = null;
-				break;
+			}
 		}
 	}
 
 	@Override
 	public void onActivityPaused(final Activity activity) {
 		if (this.connectReceiver != null && (this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) != 0)
-			NfcAdapter.getDefaultAdapter(this.activity).disableForegroundDispatch(this.activity);
+			this.disableNfcReaderMode();
 
 		this.isActivityResumed = false;
 	}
 
 	@Override
 	public void onActivityStopped(final Activity activity) {
-		if (this.connectReceiver != null || this.unplugReceiver != null)
-			this.activity.unregisterReceiver(this);
+		this.unregisterReceiverIfRegistered();
 	}
 
 	private void requestPermission(final UsbDevice device) {
 		final UsbManager usbManager = (UsbManager) this.activity.getSystemService(Context.USB_SERVICE);
 
-		if (!UsbYubiKey.Type.isDeviceKnown(device))
+		if (this.connectReceiver == null || device == null || !UsbYubiKey.Type.isDeviceKnown(device))
 			return;
 
 		assert usbManager != null;
 		if (usbManager.hasPermission(device)) {
-			this.activity.unregisterReceiver(this);
+			final UsbDeviceConnection connection = usbManager.openDevice(device);
+
+			if (connection == null) {
+				// The device could not be opened, e.g. because it was unplugged in the meantime. Keep waiting for it to be attached again.
+				this.connectReceiver.onUsbPermissionDenied();
+				return;
+			}
+
+			this.unregisterReceiverIfRegistered();
 
 			if ((this.getSupportedConnectionMethods() & CONNECTION_METHOD_NFC) != 0 && this.isActivityResumed)
-				NfcAdapter.getDefaultAdapter(this.activity).disableForegroundDispatch(this.activity);
+				this.disableNfcReaderMode();
 
-			this.connectReceiver.onYubiKeyConnected(new UsbYubiKey(device, usbManager.openDevice(device)));
+			this.connectReceiver.onYubiKeyConnected(new UsbYubiKey(device, connection));
 			this.connectReceiver = null;
 		} else {
-			usbManager.requestPermission(device, PendingIntent.getBroadcast(this.activity, 0, new Intent(ACTION_USB_PERMISSION_REQUEST), Build.VERSION.SDK_INT >= 23 ? PendingIntent.FLAG_MUTABLE : 0));
+			// Since Android 14, mutable PendingIntents must be explicit. The intent has to stay mutable, as the system adds the device and the result to it.
+			final Intent permissionIntent = new Intent(ACTION_USB_PERMISSION_REQUEST).setPackage(this.activity.getPackageName());
+
+			usbManager.requestPermission(device, PendingIntent.getBroadcast(this.activity, 0, permissionIntent, Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ? PendingIntent.FLAG_MUTABLE : 0));
 		}
+	}
+
+	/**
+	 * Makes Android deliver NFC tags directly to {@link #onNfcTagDiscovered(Tag)} while the activity
+	 * is in the foreground. Other than foreground dispatch, reader mode does not read the NDEF message
+	 * of the YubiKey (which would make Android open its URL in a browser) and does not allow other
+	 * apps to handle the tag.
+	 */
+	private void enableNfcReaderMode() {
+		final Bundle options = new Bundle();
+		options.putInt(NfcAdapter.EXTRA_READER_PRESENCE_CHECK_DELAY, 50);
+
+		NfcAdapter.getDefaultAdapter(this.activity).enableReaderMode(this.activity, this::onNfcTagDiscovered,
+				NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_NFC_B | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK, options);
+	}
+
+	private void disableNfcReaderMode() {
+		NfcAdapter.getDefaultAdapter(this.activity).disableReaderMode(this.activity);
+	}
+
+	/**
+	 * Called by Android on a binder thread when an NFC tag was discovered.
+	 */
+	private void onNfcTagDiscovered(final Tag tag) {
+		this.activity.runOnUiThread(() -> {
+			// Ignore the tag if a YubiKey was connected already (or if nobody wants one anymore)
+			if (this.connectReceiver == null || this.activity.isFinishing() || this.activity.isDestroyed())
+				return;
+
+			final IsoDep isoDep = IsoDep.get(tag);
+
+			if (isoDep == null) {
+				// Not a YubiKey
+				return;
+			}
+
+			this.unregisterReceiverIfRegistered();
+
+			final YubiKeyConnectReceiver receiver = this.connectReceiver;
+			this.connectReceiver = null;
+			receiver.onYubiKeyConnected(new NfcYubiKey(isoDep));
+		});
+	}
+
+	@SuppressLint("UnspecifiedRegisterReceiverFlag") // The flag only exists (and is only required) on Android 13 and later
+	private void registerReceiverCompat(final IntentFilter filter) {
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+			// We only listen for broadcasts of the system and for the PendingIntent that we create ourselves
+			this.activity.registerReceiver(this, filter, Context.RECEIVER_NOT_EXPORTED);
+		} else {
+			this.activity.registerReceiver(this, filter);
+		}
+
+		this.receiverRegistered = true;
+	}
+
+	/**
+	 * Unregisters all registrations of this receiver, if there are any.
+	 */
+	private void unregisterReceiverIfRegistered() {
+		if (this.receiverRegistered) {
+			this.activity.unregisterReceiver(this);
+			this.receiverRegistered = false;
+		}
+	}
+
+	@SuppressWarnings("deprecation")
+	private static UsbDevice getUsbDevice(final Intent intent) {
+		// The typed variant is not used on older versions as it is broken on Android 13 (https://issuetracker.google.com/issues/240585930)
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+			return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE, UsbDevice.class);
+
+		return intent.getParcelableExtra(UsbManager.EXTRA_DEVICE);
 	}
 
 	/**
@@ -233,7 +325,9 @@ class ConnectionManager extends BroadcastReceiver implements Application.Activit
 		if (packageManager.hasSystemFeature(PackageManager.FEATURE_USB_HOST))
 			result |= CONNECTION_METHOD_USB;
 
-		if (packageManager.hasSystemFeature(PackageManager.FEATURE_NFC) && NfcAdapter.getDefaultAdapter(this.activity).isEnabled())
+		final NfcAdapter nfcAdapter = NfcAdapter.getDefaultAdapter(this.activity);
+
+		if (packageManager.hasSystemFeature(PackageManager.FEATURE_NFC) && nfcAdapter != null && nfcAdapter.isEnabled())
 			result |= CONNECTION_METHOD_NFC;
 
 		return result;

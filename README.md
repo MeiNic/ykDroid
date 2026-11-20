@@ -1,7 +1,8 @@
 # ykDroid
 
 ykDroid is an Android app that provides an interface for integrating the challenge-response functionality
-of YubiKeys into other apps. Both USB and NFC (YubiKey NEO required for NFC) are supported on compatible devices.
+of YubiKeys into other apps. Both USB and NFC (any YubiKey with NFC, e.g. the YubiKey NEO or the YubiKey 5 NFC) are
+supported on compatible devices.
 
 [<img src="https://play.google.com/intl/en_us/badges/images/generic/en-play-badge.png"
      alt="Get it on Google Play"
@@ -39,10 +40,27 @@ public void onActivityResult(final int requestCode, final int resultCode, final 
 }
 ```
 
+## Using your YubiKey
+* ykDroid uses the HMAC-SHA1 challenge-response feature of your YubiKey. It must be configured for it in one of the two
+  slots (e.g. using YubiKey Manager or the YubiKey Personalization Tool). Select that slot in the dialog that ykDroid
+  shows. Your choice is remembered.
+* Over USB, the OTP interface of your YubiKey must be enabled.
+* Over NFC, OTP must be enabled for NFC, and the slot must not be configured to require touching the button. Hold the
+  YubiKey against the NFC antenna of your device until the dialog closes.
+
 ## Apps that integrate ykDroid
 * [Keepass2Android](https://play.google.com/store/apps/details?id=keepass2android.keepass2android) - Password manager
   app compatible with KeePass
 * [ykpass](https://github.com/noliran/ykpass) - Password app that derives passwords directly from the YubiKey's response value
+
+## Building
+You need a JDK (17 or newer) and the Android SDK with platform 36 (`ANDROID_HOME` must point to it):
+```
+./gradlew assembleDebug
+```
+The APK is created in `app/build/outputs/apk/debug/`. Release builds (`./gradlew assembleRelease`) are unsigned and have
+to be aligned and signed using `zipalign` and `apksigner` before they can be installed. Android only accepts updates
+signed with the same key, so an already installed ykDroid from another source must be uninstalled first.
 
 ## Contributing
 PRs welcome! I am open for adding more YubiKey functionality, but bugfixes and additional translations are also very

@@ -15,6 +15,11 @@ public interface YubiKey {
 	int CHALLENGE_RESPONSE_LENGTH = 20;
 
 	/**
+	 * Maximum length of a challenge (in bytes)
+	 */
+	int MAX_CHALLENGE_LENGTH = 64;
+
+	/**
 	 * Sends a challenge to the YubiKey and returns the response received. May wait for the user to
 	 * press the button on the YubiKey, depending on its configuration. Thus, this method should
 	 * not be called on the UI thread to ensure good user experience.
@@ -29,4 +34,10 @@ public interface YubiKey {
 	 *                              be thrown.
 	 */
 	byte[] challengeResponse(final Slot slot, final byte[] challenge) throws YubiKeyException;
+
+	/**
+	 * Releases the connection to the YubiKey. Must be called as soon as the YubiKey is not needed
+	 * anymore.
+	 */
+	void close();
 }

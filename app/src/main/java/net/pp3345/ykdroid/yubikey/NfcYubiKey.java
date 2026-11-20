@@ -3,6 +3,7 @@ package net.pp3345.ykdroid.yubikey;
 import android.nfc.tech.IsoDep;
 
 import net.pp3345.ykdroid.YubiKey;
+import net.pp3345.ykdroid.apdu.ResponseApdu;
 import net.pp3345.ykdroid.apdu.command.iso.SelectFileApdu;
 import net.pp3345.ykdroid.apdu.command.ykoath.PutApdu;
 import net.pp3345.ykdroid.apdu.response.ykoath.PutResponseApdu;
@@ -52,20 +53,39 @@ public class NfcYubiKey implements YubiKey {
 			this.ensureConnected();
 
 			final SelectFileApdu selectFileApdu = new SelectFileApdu(SelectFileApdu.SelectionControl.DF_NAME_DIRECT, SelectFileApdu.RecordOffset.FIRST_RECORD, CHALLENGE_AID);
-			if (!selectFileApdu.parseResponse(this.tag.transceive(selectFileApdu.build())).isSuccess()) {
-				throw new FailedOperationException();
+			final ResponseApdu   selectResponse = selectFileApdu.parseResponse(this.tag.transceive(selectFileApdu.build()));
+			if (!selectResponse.isSuccess()) {
+				throw new FailedOperationException("Failed to select application, status word: " + formatStatusWord(selectResponse));
 			}
 
 			final PutApdu         putApdu         = new PutApdu(slot, challenge);
 			final PutResponseApdu putResponseApdu = putApdu.parseResponse(this.tag.transceive(putApdu.build()));
 
 			if (!putResponseApdu.isSuccess()) {
-				throw new FailedOperationException();
+				throw new FailedOperationException("Challenge-response failed, status word: " + formatStatusWord(putResponseApdu));
+			}
+
+			if (!putResponseApdu.hasResult()) {
+				// The YubiKey reports success but does not return any data if the slot is not configured for HMAC-SHA1
+				throw new SlotNotConfiguredException();
 			}
 
 			return putResponseApdu.getResult();
 		} catch (final IOException e) {
 			throw new ConnectionLostException(e);
 		}
+	}
+
+	@Override
+	public void close() {
+		try {
+			this.tag.close();
+		} catch (final IOException ignored) {
+			// There is nothing left to clean up if the connection to the tag is already gone
+		}
+	}
+
+	private static String formatStatusWord(final ResponseApdu response) {
+		return String.format("%04x", response.getStatusWord() & 0xffff);
 	}
 }
